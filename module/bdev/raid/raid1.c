@@ -13,6 +13,18 @@ struct raid1_info {
 	struct raid_bdev *raid_bdev;
 };
 
+/* TODO: */ 
+static int32_t 
+get_current_bdev_io_index(struct spdk_bdev_io *bdev_io, struct raid_bdev_io *raid_io){
+	//TODO: правильно ли я выбираю num_base_bdevs или надо использовать num_base_bdevs_discovered
+	for(uint8_t i = 0; i < raid_io->raid_bdev->num_base_bdevs; i++) {
+		if(raid_io->raid_bdev->base_bdev_info[i].name == bdev_io->bdev->name) {
+			return i;
+		}
+	}
+	return -ENODEV;
+};
+
 static void
 raid1_bdev_io_completion(struct spdk_bdev_io *bdev_io, bool success, void *cb_arg)
 {
@@ -118,6 +130,7 @@ raid1_submit_write_request(struct raid_bdev_io *raid_io)
 		base_ch = raid_io->raid_ch->base_channel[idx];
 
 		if (base_ch == NULL) {
+			// TODO: тестить rebuild_matrix
 			/* skip a missing base bdev's slot */
 			raid_io->base_bdev_io_submitted++;
 			raid_bdev_io_complete_part(raid_io, 1, SPDK_BDEV_IO_STATUS_SUCCESS);
