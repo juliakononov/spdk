@@ -206,7 +206,7 @@ struct raid_rebuild {
 	uint8_t				num_base_bdevs;
 
 	/* number of memory areas */
-	uint64_t            num_memory_areas
+	uint64_t            num_memory_areas;
 };
 
 /*
