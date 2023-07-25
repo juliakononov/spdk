@@ -8,13 +8,17 @@
 #include "spdk/likely.h"
 #include "spdk/log.h"
 
+#define BIT_CHECK(number, shift) (number & (1UL << shift))
+#define BIT_INSERT(number, shift) (number |= 1UL << shift)
+#define KB_TO_BYTES(number) (number << 10)
+
 struct raid1_info {
 	/* The parent raid bdev */
 	struct raid_bdev *raid_bdev;
 };
 
-/* TODO: */ 
-static int32_t 
+/* Find the bdev index of the current IO request */ 
+static uint32_t 
 get_current_bdev_io_index(struct spdk_bdev_io *bdev_io, struct raid_bdev_io *raid_io){
 	//TODO: правильно ли я выбираю num_base_bdevs или надо использовать num_base_bdevs_discovered
 	for(uint8_t i = 0; i < raid_io->raid_bdev->num_base_bdevs; i++) {
@@ -23,7 +27,42 @@ get_current_bdev_io_index(struct spdk_bdev_io *bdev_io, struct raid_bdev_io *rai
 		}
 	}
 	return -ENODEV;
-};
+}
+
+/* Write a broken block to the rebuild_matrix */
+static void 
+write_in_rbm_broken_block(struct spdk_bdev_io *bdev_io, struct raid_bdev_io *raid_io) 
+{
+	/* blocks */
+	uint64_t blockcnt = raid_io->raid_bdev->bdev.blockcnt;
+	uint32_t blocklen = raid_io->raid_bdev->bdev.blocklen;
+
+	uint64_t offset_blocks = bdev_io->u.bdev.offset_blocks;
+	uint64_t num_blocks = bdev_io->u.bdev.num_blocks;
+
+	/* blocks -> strips */
+	uint32_t strip_size_b = KB_TO_BYTES(raid_io->raid_bdev->strip_size_kb);
+	uint64_t stripcnt = (blockcnt * blocklen) / strip_size_b;
+
+	uint64_t offset_strips = (offset_blocks * blocklen) / strip_size_b;
+	uint64_t num_strips = ((offset_blocks + num_blocks + strip_size_b - 1) / strip_size_b) - offset_strips;
+	
+	/* strips -> areas*/
+	uint64_t num_memory_areas = raid_io->raid_bdev->raid_rebuild.num_memory_areas;
+  	uint64_t stripcnt_in_memory_area = stripcnt / num_memory_areas;
+
+	uint64_t offset_areas = offset_strips / stripcnt_in_memory_area;
+	uint64_t num_areas = ((offset_strips + num_strips + stripcnt_in_memory_area -1) / stripcnt_in_memory_area) - offset_areas;
+
+
+  	uint32_t bdev_io_index = get_current_bdev_io_index(bdev_io, raid_io);
+	for (int cur_memory_area = offset_areas, cur_memory_area < offset_areas + num_areas, cur_memory_area++) {
+		uint64_t broken_memory_area = raid_io->raid_bdev->raid_rebuild.rebuild_matrix[cur_memory_area];
+		if (!BIT_CHECK(broken_memory_area, bdev_io_index)) {
+			BIT_INSERT(broken_memory_area, bdev_io_index);
+		}
+  	}
+}	
 
 static void
 raid1_bdev_io_completion(struct spdk_bdev_io *bdev_io, bool success, void *cb_arg)
@@ -31,6 +70,10 @@ raid1_bdev_io_completion(struct spdk_bdev_io *bdev_io, bool success, void *cb_ar
 	struct raid_bdev_io *raid_io = cb_arg;
 
 	spdk_bdev_free_io(bdev_io);
+
+	if(!success) {
+		write_in_rbm_broken_block(bdev_io, raid_io)
+	}
 
 	raid_bdev_io_complete_part(raid_io, 1, success ?
 				   SPDK_BDEV_IO_STATUS_SUCCESS :
