@@ -10,6 +10,14 @@
 #include "spdk/bdev_module.h"
 #include "spdk/uuid.h"
 
+enum rebuild_flags {
+	/* if there is no broken area in rbm(rebuild_matrix) */
+	NOT_NEED_REBUILD = 1,
+
+	/* if there is at least one broken area in rbm(rebuild_matrix) */
+	NEED_REBUILD = -1,
+};
+
 enum raid_level {
 	INVALID_RAID_LEVEL	= -1,
 	RAID0			= 0,
@@ -100,7 +108,7 @@ struct raid_bdev_io {
 };
 
 /* 
-* raid_rebuild assists in the raid bdev rebuild process.
+* raid_rebuild assists in the raid bdev rebuild process. TODO: реализовать нормальную инициализыцию в зависимости от устройств, которые подрубаются.
 */
 struct raid_rebuild {
 	/* stores data on broken memory areas */
@@ -111,6 +119,13 @@ struct raid_rebuild {
 
 	/* number of memory areas */
 	uint64_t            num_memory_areas;
+
+	/* TODO: как отработает с null */
+	/* TODO: (stripcnt*blocklen) / (strip_size*num_memory_areas) */
+	uint64_t 			strips_per_area;
+
+	/* rebuild flag */
+	uint8_t				rebuild_flag;
 };
 
 /*
