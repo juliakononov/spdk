@@ -42,9 +42,9 @@ extern "C" {
 /* Ceiling division of unsigned integers */
 #define SPDK_CEIL_DIV(x,y) (((x)+(y)-1)/(y))
 
-#define BIT_CHECK(number, shift_size) (number & (1UL << shift_size))
+#define CHECK_BIT(number, shift_size) (number & (1UL << shift_size))
 
-#define BIT_INSERT(number, shift_size) (number |= 1UL << shift_size)
+#define INSERT_BIT(number, shift_size) (number |= 1UL << shift_size)
 
 #define KB_TO_BYTES(number) (number << 10)
 
