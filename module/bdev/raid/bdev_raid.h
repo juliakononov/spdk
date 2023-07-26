@@ -5,7 +5,10 @@
 
 #ifndef SPDK_BDEV_RAID_INTERNAL_H
 #define SPDK_BDEV_RAID_INTERNAL_H
+
 #define MATRIX_REBUILD_SIZE 32768 /* 2^15 */
+
+#define MATRIX_REBUILD_AREAS_IN_USE 2
 
 #include "spdk/bdev_module.h"
 #include "spdk/uuid.h"
@@ -114,9 +117,6 @@ struct raid_rebuild {
 	/* stores data on broken memory areas */
 	uint64_t rebuild_matrix[MATRIX_REBUILD_SIZE];
 	
-	/* number of base bdevs comprising raid bdev  */
-	uint8_t				num_base_bdevs;
-
 	/* number of memory areas */
 	uint64_t            num_memory_areas;
 
