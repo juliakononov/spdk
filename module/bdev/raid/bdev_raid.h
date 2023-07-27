@@ -56,6 +56,23 @@ enum raid_bdev_state {
 typedef void (*raid_bdev_remove_base_bdev_cb)(void *ctx, int status);
 
 /*
+ * raid_rebuild assists in the raid bdev rebuild process.
+ */
+struct raid_rebuild {
+	/* stores data on broken memory areas */
+	uint64_t rebuild_matrix[MATRIX_REBUILD_SIZE];
+
+	/* number of memory areas */
+	uint64_t            num_memory_areas;
+
+	/* strip count in one area */
+	uint64_t            strips_per_area;
+
+	/* rebuild flag */
+	uint8_t				rebuild_flag;
+};
+
+/*
  * raid_base_bdev_info contains information for the base bdevs which are part of some
  * raid. This structure contains the per base bdev information. Whatever is
  * required per base device for raid bdev will be kept here
@@ -108,24 +125,6 @@ struct raid_bdev_io {
 
 	/* Private data for the raid module */
 	void				*module_private;
-};
-
-/* 
-* raid_rebuild assists in the raid bdev rebuild process. TODO: реализовать нормальную инициализыцию в зависимости от устройств, которые подрубаются.
-*/
-struct raid_rebuild {
-	/* stores data on broken memory areas */
-	uint64_t rebuild_matrix[MATRIX_REBUILD_SIZE];
-	
-	/* number of memory areas */
-	uint64_t            num_memory_areas;
-
-	/* TODO: как отработает с null */
-	/* TODO: (stripcnt*blocklen) / (strip_size*num_memory_areas) */
-	uint64_t 			strips_per_area;
-
-	/* rebuild flag */
-	uint8_t				rebuild_flag;
 };
 
 /*
@@ -223,7 +222,7 @@ const char *raid_bdev_state_to_str(enum raid_bdev_state state);
 void raid_bdev_write_info_json(struct raid_bdev *raid_bdev, struct spdk_json_write_ctx *w);
 int raid_bdev_remove_base_bdev(struct spdk_bdev *base_bdev, raid_bdev_remove_base_bdev_cb cb_fn,
 			       void *cb_ctx);
-				   
+
 
 /*
  * RAID module descriptor

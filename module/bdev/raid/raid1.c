@@ -2,18 +2,6 @@
  *   Copyright (C) 2022 Intel Corporation.
  *   All rights reserved.
  */
-
-#define CHECK_REBUILD_MATRIX_INFO_ON_STOP
-#define CHECK_REBUILD_MATRIX_INFO_ON_START
-#define CHECK_REBUILD_MATRIX_INFO_ON_get_io_area_range
-#define TEST_BASE_BDEV_INDEX
-#define TEST_WRITE_MATRIX
-#define CHECK_MATH
-#define CHECK_READ_ERROR
-#define FIND_get_io_area_range
-#define BASE_BDEV_NAME_in_COMPLITION
-#define default_read_test 
-
 #include "bdev_raid.h"
 
 #include "spdk/likely.h"
@@ -26,27 +14,12 @@ struct raid1_info {
 	struct raid_bdev *raid_bdev;
 };
 
-/* Find the bdev index of the current IO request */ 
-static uint32_t 
+/* Find the bdev index of the current IO request */
+static uint32_t
 get_current_bdev_idx(struct spdk_bdev_io *bdev_io, struct raid_bdev_io *raid_io, uint32_t *bdev_idx)
 {
-
-#ifdef TEST_BASE_BDEV_INDEX
-//TODO: правильно ли я выбираю num_base_bdevs или надо использовать num_base_bdevs_discovered
-	SPDK_NOTICELOG("\n<-| TEST_BASE_BDEV_INDEX!!! |->\n");
-	SPDK_NOTICELOG("raid_bdev_name = %s\n", raid_io->raid_bdev->bdev.name);
-	SPDK_NOTICELOG("spdk_bdev_name = %s\n", bdev_io->bdev->name);
-#endif
-
-	for(uint8_t i = 0; i < raid_io->raid_bdev->num_base_bdevs; i++) {
-
-#ifdef TEST_BASE_BDEV_INDEX
-	SPDK_NOTICELOG("raid_io->raid_bdev->base_bdev_info[i].name = %s\n", raid_io->raid_bdev->base_bdev_info[i].name);
-	SPDK_NOTICELOG("bdev_io->bdev->name = %s\n", bdev_io->bdev->name);
-	SPDK_NOTICELOG("<--------------------------->\n");
-#endif
-
-		if(raid_io->raid_bdev->base_bdev_info[i].name == bdev_io->bdev->name) {
+	for (uint8_t i = 0; i < raid_io->raid_bdev->num_base_bdevs; i++) {
+		if (raid_io->raid_bdev->base_bdev_info[i].name == bdev_io->bdev->name) {
 			*bdev_idx = i;
 			return 0;
 		}
@@ -54,107 +27,53 @@ get_current_bdev_idx(struct spdk_bdev_io *bdev_io, struct raid_bdev_io *raid_io,
 	return -ENODEV;
 }
 
-/* Allows to define the memory_rebuild_areas that are involved in current io request */
+/* Allows to define the memory_rebuild_areas that are involved in current IO request */
 static void
-get_io_area_range(struct spdk_bdev_io *bdev_io, struct raid_bdev *raid_bdev, uint64_t *i, uint64_t *n)
+get_io_area_range(struct spdk_bdev_io *bdev_io, struct raid_bdev *raid_bdev, uint64_t *offset,
+		  uint64_t *num)
 {
-	/* TODO: 
-	 * Сделать проверку + инициализацию полей; raid_bdev->rebuild (все)
-	 */
-
-#ifdef CHECK_REBUILD_MATRIX_INFO_ON_get_io_area_range
-	SPDK_NOTICELOG("\n<-| RAID_BDEV+REBUILD in get_io_area_range!!! |->\n");
-	SPDK_NOTICELOG("strip_size = %lu\n", raid_bdev->strip_size);
-	SPDK_NOTICELOG("num_base_bdevs = %lu\n", raid_bdev->num_base_bdevs);
-	SPDK_NOTICELOG("num_base_bdevs_discovered = %lu\n", raid_bdev->num_base_bdevs_discovered);
-	SPDK_NOTICELOG("blockcnt = %lu\n", raid_bdev->bdev.blockcnt);
-	SPDK_NOTICELOG("blocklen = %lu\n", raid_bdev->bdev.blocklen);
-	SPDK_NOTICELOG("strips_per_area = %lu\n", raid_bdev->rebuild.strips_per_area);
-	SPDK_NOTICELOG("rebuild_flag = %lu\n", raid_bdev->rebuild.rebuild_flag);
-	SPDK_NOTICELOG("num_memory_areas = %lu\n", raid_bdev->rebuild.num_memory_areas);
-	SPDK_NOTICELOG("<--------------------------->\n");
-#endif
-
 	/* blocks */
 	uint64_t offset_blocks = bdev_io->u.bdev.offset_blocks;
 	uint64_t num_blocks = bdev_io->u.bdev.num_blocks;
 
 	/* blocks -> strips */
 	uint64_t offset_strips = (offset_blocks) / raid_bdev->strip_size;
-	uint64_t num_strips = SPDK_CEIL_DIV(offset_blocks + num_blocks, raid_bdev->strip_size) - offset_strips;
-	
-	/* strips -> areas*/
+	uint64_t num_strips = SPDK_CEIL_DIV(offset_blocks + num_blocks,
+					    raid_bdev->strip_size) - offset_strips;
+
+	/* strips -> areas */
 	uint64_t strips_per_area = raid_bdev->rebuild.strips_per_area;
 
 	uint64_t offset_areas = offset_strips / strips_per_area;
 	uint64_t num_areas = SPDK_CEIL_DIV(offset_strips + num_strips, strips_per_area) - offset_areas;
 
-#ifdef CHECK_MATH
-	SPDK_NOTICELOG("\n<-| CHECK_MATH!!! |->\n");
-	SPDK_NOTICELOG("offset_blocks = %lu\n", offset_blocks);
-	SPDK_NOTICELOG("num_blocks = %lu\n", num_blocks);
-	SPDK_NOTICELOG("offset_strips = %lu\n", offset_strips);
-	SPDK_NOTICELOG("num_strips = %lu\n", num_strips);
-	SPDK_NOTICELOG("strips_per_area = %lu\n", strips_per_area);
-	SPDK_NOTICELOG("offset_areas = %lu\n", offset_areas);
-	SPDK_NOTICELOG("num_areas = %lu\n", num_areas);
-	SPDK_NOTICELOG("<--------------------------->\n");
-#endif
 
-	*i = offset_areas;
-	*n = num_areas;
+	*offset = offset_areas;
+	*num = num_areas;
 }
 
 /* Write a broken block to the rebuild_matrix */
-static void 
-write_in_rbm_broken_block(struct spdk_bdev_io *bdev_io, struct raid_bdev_io *raid_io) 
+static void
+write_in_rbm_broken_block(struct spdk_bdev_io *bdev_io, struct raid_bdev_io *raid_io,
+			  uint32_t bdev_idx)
 {
-	/* TODO:
-	 * протестировать.
-	 */
 	uint64_t offset_areas = 0;
 	uint64_t num_areas = 0;
-	uint32_t bdev_idx =  0;
-
-#ifdef FIND_get_io_area_range
-	SPDK_NOTICELOG("\n|--|get_io_area_range in write_in_rbm_broken_block!!! |--|\n");
-#endif
 
 	get_io_area_range(bdev_io, raid_io->raid_bdev, &offset_areas, &num_areas);
 
-	/* возможно, spdk_bdev_io на этом уравне - это spdk_bdev_io-> raid_bdev */
-  	get_current_bdev_idx(bdev_io, raid_io, &bdev_idx);
-
-#ifdef TEST_WRITE_MATRIX
-	SPDK_NOTICELOG("\n<-| TEST_WRITE_MATRIX!!! |->\n");
-	SPDK_NOTICELOG("current io base bdev idx = %lu", bdev_idx);
-#endif
-
 	for (uint64_t i = offset_areas; i < offset_areas + num_areas; i++) {
 		uint64_t *area = &raid_io->raid_bdev->rebuild.rebuild_matrix[i];
-		// if (!CHECK_BIT(*area, bdev_idx)) {
-			INSERT_BIT(*area, bdev_idx);
-
-#ifdef TEST_WRITE_MATRIX
-	SPDK_NOTICELOG("%lu) current_area = %lu\n", i, *area);
-#endif
-		// }
-  	}
-#ifdef TEST_WRITE_MATRIX
-	SPDK_NOTICELOG("<--------------------------->\n");
-#endif
-}	
+		INSERT_BIT(*area, bdev_idx);
+	}
+}
 
 /* Determine if a device needs a rebuild or not */
-static int 
+static int
 get_bdev_rebuild_status(struct raid_bdev *raid_bdev, struct spdk_bdev_io *bdev_io, uint8_t bdev_idx)
 {
 	uint64_t offset_areas = 0;
 	uint64_t num_areas = 0;
-
-#ifdef FIND_get_io_area_range
-	SPDK_NOTICELOG("\n|--|get_io_area_range in get_bdev_rebuild_status!!! |--|\n");
-#endif
 
 	get_io_area_range(bdev_io, raid_bdev, &offset_areas, &num_areas);
 
@@ -163,7 +82,7 @@ get_bdev_rebuild_status(struct raid_bdev *raid_bdev, struct spdk_bdev_io *bdev_i
 		if (CHECK_BIT(area, bdev_idx)) {
 			return NEED_REBUILD;
 		}
-  	}
+	}
 	return NOT_NEED_REBUILD;
 }
 
@@ -171,18 +90,17 @@ static void
 raid1_bdev_io_completion(struct spdk_bdev_io *bdev_io, bool success, void *cb_arg)
 {
 	struct raid_bdev_io *raid_io = cb_arg;
+	uint32_t bdev_idx = 0;
+
+	get_current_bdev_idx(bdev_io, raid_io, &bdev_idx);
 
 	spdk_bdev_free_io(bdev_io);
 
-#ifdef BASE_BDEV_NAME_in_COMPLITION
-	SPDK_NOTICELOG("\n<- spdk_bdev_io in COMPLITION = %s | status = %d->\n", bdev_io->bdev->name, success);
-#endif
-
-	if(!success) {
-		write_in_rbm_broken_block(bdev_io, raid_io);
+	if (!success) {
+		write_in_rbm_broken_block(bdev_io, raid_io, bdev_idx);
 
 	}
-//TODO: надо ли менять флаг SPDK_BDEV_IO_STATUS_FAILED на SPDK_BDEV_IO_STATUS_SUCCESS после прохода по облостям дисков
+
 	raid_bdev_io_complete_part(raid_io, 1, success ?
 				   SPDK_BDEV_IO_STATUS_SUCCESS :
 				   SPDK_BDEV_IO_STATUS_FAILED);
@@ -220,32 +138,16 @@ raid1_submit_read_request(struct raid_bdev_io *raid_io)
 	uint64_t pd_lba, pd_blocks;
 	int ret;
 
-
-#ifdef CHECK_READ_ERROR
-	SPDK_NOTICELOG("\n<-| CHECK_READ_ERROR!!! |->\n");
-	SPDK_NOTICELOG("raid_bdev_name = %s\n", raid_bdev->bdev.name);
-	SPDK_NOTICELOG("spdk_bdev_name = %s\n", bdev_io->bdev->name);
-#endif
-
 	RAID_FOR_EACH_BASE_BDEV(raid_bdev, base_info) {
 		base_ch = raid_io->raid_ch->base_channel[idx];
 		if (base_ch != NULL) {
-
-#ifdef CHECK_READ_ERROR
-	SPDK_NOTICELOG("\n<-| CURRENT BDEV %d |->\n", idx);
-#endif
 			if (get_bdev_rebuild_status(raid_bdev, bdev_io, idx) == NOT_NEED_REBUILD) {
 				break;
 			}
 			base_ch = NULL;
-			/* TODO: Do I need to free the base_ch with the broken-area?*/
 		}
 		idx++;
 	}
-
-#ifdef CHECK_READ_ERROR
-	SPDK_NOTICELOG("<--------------------------->\n");
-#endif
 
 	if (base_ch == NULL) {
 		raid_bdev_io_complete(raid_io, SPDK_BDEV_IO_STATUS_FAILED);
@@ -300,9 +202,10 @@ raid1_submit_write_request(struct raid_bdev_io *raid_io)
 		base_ch = raid_io->raid_ch->base_channel[idx];
 
 		if (base_ch == NULL) {
-			// TODO: тестить rebuild_matrix
-			/* skip a missing base bdev's slot */
 			raid_io->base_bdev_io_submitted++;
+
+			write_in_rbm_broken_block(bdev_io, raid_io, idx);
+
 			raid_bdev_io_complete_part(raid_io, 1, SPDK_BDEV_IO_STATUS_SUCCESS);
 			continue;
 		}
@@ -360,12 +263,7 @@ raid1_submit_rw_request(struct raid_bdev_io *raid_io)
 
 static void
 init_rebuild(struct raid_bdev *raid_bdev)
-{	
-
-#ifdef default_read_test 
-	raid_bdev->rebuild.rebuild_matrix[0] = 1;
-#endif
-
+{
 	raid_bdev->rebuild.num_memory_areas = MATRIX_REBUILD_AREAS_IN_USE;
 	uint64_t stripcnt = SPDK_CEIL_DIV(raid_bdev->bdev.blockcnt, raid_bdev->strip_size);
 	raid_bdev->rebuild.strips_per_area = SPDK_CEIL_DIV(stripcnt, MATRIX_REBUILD_AREAS_IN_USE);
@@ -395,39 +293,12 @@ raid1_start(struct raid_bdev *raid_bdev)
 
 	init_rebuild(raid_bdev);
 
-#ifdef CHECK_REBUILD_MATRIX_INFO_ON_START
-	SPDK_NOTICELOG("\n<-| RAID_BDEV+REBUILD on START!!! |->\n");
-	SPDK_NOTICELOG("strip_size = %lu\n", raid_bdev->strip_size);
-	SPDK_NOTICELOG("num_base_bdevs = %lu\n", raid_bdev->num_base_bdevs);
-	SPDK_NOTICELOG("num_base_bdevs_discovered = %lu\n", raid_bdev->num_base_bdevs_discovered);
-	SPDK_NOTICELOG("blockcnt = %lu\n", raid_bdev->bdev.blockcnt);
-	SPDK_NOTICELOG("blocklen = %lu\n", raid_bdev->bdev.blocklen);
-	SPDK_NOTICELOG("strips_per_area = %lu\n", raid_bdev->rebuild.strips_per_area);
-	SPDK_NOTICELOG("rebuild_flag = %lu\n", raid_bdev->rebuild.rebuild_flag);
-	SPDK_NOTICELOG("num_memory_areas = %lu\n", raid_bdev->rebuild.num_memory_areas);
-	SPDK_NOTICELOG("<--------------------------->\n");
-#endif
-
 	return 0;
 }
 
 static bool
 raid1_stop(struct raid_bdev *raid_bdev)
 {
-
-#ifdef CHECK_REBUILD_MATRIX_INFO_ON_STOP
-	SPDK_NOTICELOG("\n<-| RAID_BDEV+REBUILD on STOP!!! |->\n");
-	SPDK_NOTICELOG("strip_size = %lu\n", raid_bdev->strip_size);
-	SPDK_NOTICELOG("num_base_bdevs = %lu\n", raid_bdev->num_base_bdevs);
-	SPDK_NOTICELOG("num_base_bdevs_discovered = %lu\n", raid_bdev->num_base_bdevs_discovered);
-	SPDK_NOTICELOG("blockcnt = %lu\n", raid_bdev->bdev.blockcnt);
-	SPDK_NOTICELOG("blocklen = %lu\n", raid_bdev->bdev.blocklen);
-	SPDK_NOTICELOG("strips_per_area = %lu\n", raid_bdev->rebuild.strips_per_area);
-	SPDK_NOTICELOG("rebuild_flag = %lu\n", raid_bdev->rebuild.rebuild_flag);
-	SPDK_NOTICELOG("num_memory_areas = %lu\n", raid_bdev->rebuild.num_memory_areas);
-	SPDK_NOTICELOG("<--------------------------->\n");
-#endif
-
 	struct raid1_info *r1info = raid_bdev->module_private;
 
 	free(r1info);
