@@ -12,6 +12,10 @@
 
 #include "service.h"
 
+#define DEBUG__
+
+/* ============================ TESTS ==================================== */
+
 // TODO: Сейчас iovcnt = 1, доделать, чтоб можно было создавать любого количества
 #define _MUX_BUF_LENGTH 1
 // ----- //
@@ -23,17 +27,9 @@ struct container {
     struct iovec * buff;
 } typedef container;
 
-/* Poller functionality */
-int 
-run_rebuild_poller(void* arg)
-{
-    struct raid_bdev *raid_bdev = arg;
-    SPDK_WARNLOG("poller is working now with: %s!\n", raid_bdev->bdev.name);
-    return 0;
-}
 
 static inline struct iovec *
-alloc_buffer_elem(size_t iovlen, size_t align)
+alloc_continuous_buffer_part(size_t iovlen, size_t align)
 {
     struct iovec *buf;
     buf = spdk_dma_zmalloc(sizeof(struct iovec), 0, NULL);
@@ -54,7 +50,7 @@ alloc_buffer_elem(size_t iovlen, size_t align)
 }
 
 static inline void
-free_buffer_elem(struct iovec * buf_elem)
+free_continuous_buffer_part(struct iovec * buf_elem)
 {
     spdk_dma_free(buf_elem->iov_base);
     spdk_dma_free(buf_elem);
@@ -96,7 +92,7 @@ cd_read_func(struct spdk_bdev_io *bdev_io, bool success, void *cb_arg)
         SPDK_ERRLOG("test (read) fail\n");
     }
 
-    free_buffer_elem(cont->buff);
+    free_continuous_buffer_part(cont->buff);
     spdk_bdev_free_io(bdev_io);
     free(cont);
     SPDK_WARNLOG("test (read) success\n");
@@ -113,7 +109,7 @@ cd_write_func(struct spdk_bdev_io *bdev_io, bool success, void *cb_arg)
         SPDK_ERRLOG("test (write) fail\n");
     }
 
-    free_buffer_elem(cont->buff);
+    free_continuous_buffer_part(cont->buff);
     spdk_bdev_free_io(bdev_io);
     submit_read_request_base_bdev(cont->raid_bdev, cont->idx);
     free(cont);
@@ -130,7 +126,7 @@ submit_write_request_base_bdev(struct raid_bdev *raid_bdev, uint8_t idx)
     int ret;
 
 
-    buffer = alloc_buffer_elem(base_bdev->blocklen, base_bdev->required_alignment);
+    buffer = alloc_continuous_buffer_part(base_bdev->blocklen, base_bdev->required_alignment);
     if (fill_ones_write_request(buffer, 1) != 0)
     {
         SPDK_ERRLOG("fill_ones_write_request was fail\n");
@@ -163,7 +159,7 @@ submit_read_request_base_bdev(struct raid_bdev *raid_bdev, uint8_t idx)
     container *cont;
     int ret;
 
-    buffer = alloc_buffer_elem(base_bdev->blocklen, base_bdev->required_alignment);
+    buffer = alloc_continuous_buffer_part(base_bdev->blocklen, base_bdev->required_alignment);
 
     cont = calloc(1, sizeof(container));
     if (cont == NULL){
@@ -181,4 +177,89 @@ submit_read_request_base_bdev(struct raid_bdev *raid_bdev, uint8_t idx)
     } else {
         SPDK_ERRLOG("submit test (read) fail\n");
     }
+}
+/* ======================================================================== */
+
+/* ======================= Poller functionality =========================== */
+
+static inline void
+_free_sg_buffer_part(struct iovec *vec_array, uint32_t len)
+{ //TODO: проверить, что оно работает (в for совсем неуверен)
+    struct iovec *base_vec;
+
+    for(base_vec = vec_array; base_vec < vec_array + len; base_vec++)
+    {
+        spdk_dma_free(base_vec->iov_base);
+    }
+}
+
+static inline void
+free_sg_buffer (struct iovec **vec_array, uint32_t len) 
+{
+    /* usage: struct iovec *a; free_sg_buffer(&a, b); */
+
+    _free_sg_buffer_part(*vec_array, len);
+    spdk_dma_free(*vec_array);
+    *vec_array = NULL;
+}
+
+static inline struct iovec *
+allocate_sg_buffer(uint32_t block_size, uint32_t blockcnt, uint32_t bl_per_vec)
+{
+    uint32_t split_steps = SPDK_CEIL_DIV(blockcnt, bl_per_vec);
+    uint32_t full_split_steps = blockcnt / bl_per_vec;
+    uint32_t tail_split_size_in_blocks = blockcnt - (full_split_steps * bl_per_vec);
+
+    struct iovec *vec_array = spdk_dma_zmalloc(sizeof(struct iovec)*split_steps, 0, NULL);
+    if(vec_array == NULL)
+    {
+        return NULL;
+    }
+
+    if (split_steps != full_split_steps)
+    {
+        vec_array[0].iov_len = block_size*tail_split_size_in_blocks;
+        vec_array[0].iov_base = (void*)spdk_dma_zmalloc(sizeof(uint8_t)*vec_array[0].iov_len, 0, NULL);
+        if(vec_array[0].iov_base == NULL)
+        {
+            spdk_dma_free(vec_array);
+            return NULL;
+        }
+    }
+
+    for (uint32_t i = 1; i < split_steps; i++)
+    { //TODO: люблю лажать с индексами, проверить, что все ок
+        vec_array[i].iov_len = block_size*bl_per_vec;
+        vec_array[i].iov_base = (void*)spdk_dma_zmalloc(sizeof(uint8_t)*vec_array[i].iov_len, 0, NULL);
+        if(vec_array[i].iov_base == NULL)
+        {
+            _free_sg_buffer_part(vec_array, i);
+            spdk_dma_free(vec_array);
+            return NULL;
+        }
+    }
+    return vec_array;
+}
+
+int 
+run_rebuild_poller(void* arg)
+{ //TODO: в целом реализация наивная (без учета многопоточности) - не очень пока понимаю, как ее прикрутить.
+    struct raid_bdev *raid_bdev = arg;
+    struct raid_rebuild *rebuiuld = raid_bdev->rebuild;
+    uint32_t bls_per_strip = raid_bdev->strip_size;
+
+    /* block size in bytes */
+    uint32_t block_size = raid_bdev->strip_size_kb / raid_bdev->strip_size;
+    
+#ifdef DEBUG__
+    SPDK_WARNLOG("poller is working now with: %s!\n", raid_bdev->bdev.name);
+#endif
+    
+    if(rebuiuld == NULL)
+    {
+       SPDK_WARNLOG("%s doesn't have rebuild struct!\n", raid_bdev->bdev.name); 
+       return 1;
+    }
+    //TODO:
+    return 0;
 }
