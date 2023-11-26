@@ -9,8 +9,8 @@ include $(SPDK_ROOT_DIR)/mk/spdk.common.mk
 SO_VER := 5
 SO_MINOR := 0
 
-CFLAGS += -I$(SPDK_ROOT_DIR)/lib/bdev/
-C_SRCS = bdev_raid.c bdev_raid_rpc.c raid0.c raid1.c concat.c
+CFLAGS += -I$(SPDK_ROOT_DIR)/lib/bdev/ -I$(SPDK_ROOT_DIR)/lib/env_dpdk/
+C_SRCS = service.c bdev_raid.c bdev_raid_rpc.c raid0.c raid1.c concat.c
 
 ifeq ($(CONFIG_RAID5F),y)
 C_SRCS += raid5f.c
