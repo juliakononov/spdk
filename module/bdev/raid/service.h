@@ -6,4 +6,7 @@
 void
 submit_write_request_base_bdev(struct raid_bdev *raid_bdev, uint8_t idx);
 
+int 
+run_rebuild_poller(void* arg);
+
 #endif /* SPDK_RAID_SERVICE_INTERNAL_H */

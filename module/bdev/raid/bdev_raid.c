@@ -5,6 +5,7 @@
  */
 
 #include "bdev_raid.h"
+#include "service.h"
 #include "spdk/env.h"
 #include "spdk/thread.h"
 #include "spdk/log.h"
@@ -185,6 +186,7 @@ raid_bdev_cleanup(struct raid_bdev *raid_bdev)
 
 	TAILQ_REMOVE(&g_raid_bdev_list, raid_bdev, global_link);
 	free(raid_bdev->base_bdev_info);
+	spdk_poller_unregister(&(raid_bdev->rebuild_poller));
 }
 
 static void
@@ -1057,6 +1059,8 @@ raid_bdev_create(const char *name, uint32_t strip_size, uint8_t num_base_bdevs,
 	}
 
 	TAILQ_INSERT_TAIL(&g_raid_bdev_list, raid_bdev, global_link);
+
+	raid_bdev->rebuild_poller = SPDK_POLLER_REGISTER(run_rebuild_poller, raid_bdev, 2000);
 
 	*raid_bdev_out = raid_bdev;
 

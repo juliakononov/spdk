@@ -16,11 +16,21 @@
 #define _MUX_BUF_LENGTH 1
 // ----- //
 
+// TODO: мб не надо, переделать.
 struct container {
     struct raid_bdev *raid_bdev;
     int idx;
     struct iovec * buff;
 } typedef container;
+
+/* Poller functionality */
+int 
+run_rebuild_poller(void* arg)
+{
+    struct raid_bdev *raid_bdev = arg;
+    SPDK_WARNLOG("poller is working now with: %s!\n", raid_bdev->bdev.name);
+    return 0;
+}
 
 static inline struct iovec *
 alloc_buffer_elem(size_t iovlen, size_t align)
@@ -172,11 +182,3 @@ submit_read_request_base_bdev(struct raid_bdev *raid_bdev, uint8_t idx)
         SPDK_ERRLOG("submit test (read) fail\n");
     }
 }
-
-void 
-test_func(const char *raid_name)
-{
-    struct raid_bdev *raid_bdev =  raid_bdev_find_by_name(raid_name);
-    
-}
-

@@ -173,6 +173,9 @@ struct raid_bdev {
 	/* RAID rebuild struct */
 	struct raid_rebuild			*rebuild;
 
+	/* Poller responsible for processing rebuild */
+	struct spdk_poller *rebuild_poller;
+
 	/* Set to true if destroy of this raid bdev is started. */
 	bool				destroy_started;
 
