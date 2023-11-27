@@ -3,13 +3,13 @@
  *   All rights reserved.
  */
 
-#include "bdev_raid.h"
 #include "spdk/env.h"
 #include "spdk/bdev.h"
 #include "spdk/likely.h"
 #include "spdk/log.h"
+#include "spdk/util.h"
 
-
+#include "bdev_raid.h"
 #include "service.h"
 
 #define DEBUG__
@@ -204,11 +204,11 @@ free_sg_buffer (struct iovec **vec_array, uint32_t len)
 }
 
 static inline struct iovec *
-allocate_sg_buffer(uint32_t block_size, uint32_t blockcnt, uint32_t bl_per_vec)
+allocate_sg_buffer(uint32_t elem_size, uint32_t elemcnt, uint32_t elem_per_vec)
 {
-    uint32_t split_steps = SPDK_CEIL_DIV(blockcnt, bl_per_vec);
-    uint32_t full_split_steps = blockcnt / bl_per_vec;
-    uint32_t tail_split_size_in_blocks = blockcnt - (full_split_steps * bl_per_vec);
+    uint32_t split_steps = SPDK_CEIL_DIV(elemcnt, elem_per_vec);
+    uint32_t full_split_steps = elemcnt / elem_per_vec;
+    uint32_t tail_split_size_in_blocks = elemcnt - (full_split_steps * elem_per_vec);
 
     struct iovec *vec_array = spdk_dma_zmalloc(sizeof(struct iovec)*split_steps, 0, NULL);
     if(vec_array == NULL)
@@ -218,7 +218,7 @@ allocate_sg_buffer(uint32_t block_size, uint32_t blockcnt, uint32_t bl_per_vec)
 
     if (split_steps != full_split_steps)
     {
-        vec_array[0].iov_len = block_size*tail_split_size_in_blocks;
+        vec_array[0].iov_len = elem_size*tail_split_size_in_blocks;
         vec_array[0].iov_base = (void*)spdk_dma_zmalloc(sizeof(uint8_t)*vec_array[0].iov_len, 0, NULL);
         if(vec_array[0].iov_base == NULL)
         {
@@ -229,7 +229,7 @@ allocate_sg_buffer(uint32_t block_size, uint32_t blockcnt, uint32_t bl_per_vec)
 
     for (uint32_t i = 1; i < split_steps; i++)
     { //TODO: люблю лажать с индексами, проверить, что все ок
-        vec_array[i].iov_len = block_size*bl_per_vec;
+        vec_array[i].iov_len = elem_size*elem_per_vec;
         vec_array[i].iov_base = (void*)spdk_dma_zmalloc(sizeof(uint8_t)*vec_array[i].iov_len, 0, NULL);
         if(vec_array[i].iov_base == NULL)
         {
@@ -241,25 +241,50 @@ allocate_sg_buffer(uint32_t block_size, uint32_t blockcnt, uint32_t bl_per_vec)
     return vec_array;
 }
 
+/* 
+TODO: надо сделать какую-то крутую функция калбэка (наверное, нужен частичный и полный)
+При полном, надо обнулять флаги REBUILD_FLAG_NEED_REBUILD и REBUILD_FLAG_IN_PROGRESS
+*/ 
+
 int 
 run_rebuild_poller(void* arg)
 { //TODO: в целом реализация наивная (без учета многопоточности) - не очень пока понимаю, как ее прикрутить.
     struct raid_bdev *raid_bdev = arg;
-    struct raid_rebuild *rebuiuld = raid_bdev->rebuild;
-    uint32_t bls_per_strip = raid_bdev->strip_size;
+    struct raid_rebuild *rebuild = raid_bdev->rebuild;
 
-    /* block size in bytes */
-    uint32_t block_size = raid_bdev->strip_size_kb / raid_bdev->strip_size;
-    
 #ifdef DEBUG__
     SPDK_WARNLOG("poller is working now with: %s!\n", raid_bdev->bdev.name);
 #endif
     
-    if(rebuiuld == NULL)
+    if(rebuild == NULL)
     {
        SPDK_WARNLOG("%s doesn't have rebuild struct!\n", raid_bdev->bdev.name); 
        return 1;
     }
-    //TODO:
+
+    /* area size in strips */ 
+    uint64_t area_size = rebuild->strips_per_area;
+    /* strip size in blocks */
+    uint32_t strip_size = raid_bdev->strip_size;
+    /* block size in bytes */
+    uint32_t block_size = raid_bdev->strip_size_kb / raid_bdev->strip_size;
+
+    if (!SPDK_TEST_BIT(&(rebuild->rebuild_flag), REBUILD_FLAG_IN_PROGRESS))
+    {
+        /* The recovery process is not complete */
+        //TODO: я правильно понял, что мне надо обработать этот кейс, так как поллер будет запускаться даже тогда, когда я еще не завершил обработку.
+        return 0;
+    }
+
+    if (!SPDK_TEST_BIT(&(rebuild->rebuild_flag), REBUILD_FLAG_NEED_REBUILD))
+    {
+        /* The raid doesn't need to start rebuild process */
+        return 0;
+    }
+
+    SPDK_SET_BIT(&(rebuild->rebuild_flag), REBUILD_FLAG_IN_PROGRESS);
+
+    //TODO: тут запуск системы ребилда. 
+
     return 0;
 }

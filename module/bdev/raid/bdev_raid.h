@@ -17,6 +17,9 @@ enum rebuild_flag {
 
 	/* if there is at least one broken area in rbm(rebuild_matrix) */
 	REBUILD_FLAG_NEED_REBUILD = 1,
+
+	/* if service start rebuild process */
+	REBUILD_FLAG_IN_PROGRESS = 2
 };
 
 enum raid_level {
