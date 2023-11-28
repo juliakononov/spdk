@@ -259,10 +259,11 @@ raid1_submit_rw_request(struct raid_bdev_io *raid_io)
 static void
 init_rebuild(struct raid_bdev *raid_bdev)
 {
-	raid_bdev->rebuild->num_memory_areas = MATRIX_REBUILD_SIZE;
 	uint64_t stripcnt = SPDK_CEIL_DIV(raid_bdev->bdev.blockcnt, raid_bdev->strip_size);
 	raid_bdev->rebuild->strips_per_area = SPDK_CEIL_DIV(stripcnt, MATRIX_REBUILD_SIZE);
+	raid_bdev->rebuild->num_memory_areas = SPDK_CEIL_DIV(stripcnt, raid_bdev->rebuild->strips_per_area);
 	raid_bdev->rebuild->rebuild_flag = REBUILD_FLAG_INIT_CONFIGURATION;
+	raid_bdev->rebuild->rebuild_flag = SPDK_SET_BIT(&(raid_bdev->rebuild->rebuild_flag), REBUILD_FLAG_INITIALIZED);
 }
 
 static void
@@ -314,14 +315,30 @@ raid1_stop(struct raid_bdev *raid_bdev)
 	return true;
 }
 
+static int
+raid1_submit_rebuild_request(struct raid_bdev *raid_bdev)
+{
+	struct raid_rebuild *rebuild = raid_bdev->rebuild;
+
+	/* area size in strips */
+    uint64_t area_size = rebuild->strips_per_area;
+    /* strip size in blocks */
+    uint32_t strip_size = raid_bdev->strip_size;
+    /* block size in bytes */
+    uint32_t block_size = raid_bdev->strip_size_kb / raid_bdev->strip_size;
+
+	return 0;
+}
+
 static struct raid_bdev_module g_raid1_module = {
 	.level = RAID1,
 	.base_bdevs_min = 2,
 	.base_bdevs_constraint = {CONSTRAINT_MIN_BASE_BDEVS_OPERATIONAL, 1},
-	.memory_domains_supported = true,
+	.memory_domains_supported = true, //false?
 	.start = raid1_start,
 	.stop = raid1_stop,
 	.submit_rw_request = raid1_submit_rw_request,
+	.rebuild_request = raid1_submit_rebuild_request,
 };
 RAID_MODULE_REGISTER(&g_raid1_module)
 

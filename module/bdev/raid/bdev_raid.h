@@ -19,7 +19,10 @@ enum rebuild_flag {
 	REBUILD_FLAG_NEED_REBUILD = 1,
 
 	/* if service start rebuild process */
-	REBUILD_FLAG_IN_PROGRESS = 2
+	REBUILD_FLAG_IN_PROGRESS = 2,
+
+	/* show that rebuild struct is initialized */
+	REBUILD_FLAG_INITIALIZED = 63,
 };
 
 enum raid_level {
@@ -289,6 +292,12 @@ struct raid_bdev_module {
 	 * is satisfied.
 	 */
 	void (*resize)(struct raid_bdev *raid_bdev);
+
+	/*
+	 * Called to submit rebuild request
+	 * If implemented.
+	 */
+	int (*rebuild_request)(struct raid_bdev *raid_bdev);
 
 	TAILQ_ENTRY(raid_bdev_module) link;
 };

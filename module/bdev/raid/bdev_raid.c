@@ -1007,10 +1007,18 @@ raid_bdev_create(const char *name, uint32_t strip_size, uint8_t num_base_bdevs,
 	}
 
 	/* allocate rebuild struct  */
-	raid_bdev->rebuild = calloc(1, sizeof(struct raid_rebuild));
-	if (!raid_bdev->rebuild) {
-		SPDK_ERRLOG("Unable to allocate memory for raid rebuild struct\n");
-		return -ENOMEM;
+	switch(level) {
+		case RAID1:
+			raid_bdev->rebuild = calloc(1, sizeof(struct raid_rebuild));
+			if (!raid_bdev->rebuild) {
+				SPDK_ERRLOG("Unable to allocate memory for raid rebuild struct\n");
+				return -ENOMEM;
+			}
+			raid_bdev->rebuild_poller = SPDK_POLLER_REGISTER(run_rebuild_poller, raid_bdev, 2000);
+			break;
+		default:
+			raid_bdev->rebuild = NULL;
+			raid_bdev->rebuild_poller = NULL;
 	}
 
 	raid_bdev->module = module;
@@ -1059,8 +1067,6 @@ raid_bdev_create(const char *name, uint32_t strip_size, uint8_t num_base_bdevs,
 	}
 
 	TAILQ_INSERT_TAIL(&g_raid_bdev_list, raid_bdev, global_link);
-
-	raid_bdev->rebuild_poller = SPDK_POLLER_REGISTER(run_rebuild_poller, raid_bdev, 2000);
 
 	*raid_bdev_out = raid_bdev;
 

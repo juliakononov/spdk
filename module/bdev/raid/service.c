@@ -41,7 +41,7 @@ alloc_continuous_buffer_part(size_t iovlen, size_t align)
     buf->iov_len = iovlen;
     buf->iov_base = spdk_dma_zmalloc(sizeof(uint8_t)*(buf->iov_len), 0, NULL);
     if(buf->iov_base == NULL)
-    {   
+    {
         spdk_dma_free(buf);
         return NULL;
     }
@@ -57,9 +57,9 @@ free_continuous_buffer_part(struct iovec * buf_elem)
 }
 
 
-static inline int 
+static inline int
 fill_ones_write_request(struct iovec * buf_array, int buf_len)
-{   
+{
     // не учитывает align внутри iov_base
     SPDK_WARNLOG("i'm here 2 \n");
 
@@ -80,7 +80,7 @@ fill_ones_write_request(struct iovec * buf_array, int buf_len)
     return 0;
 }
 
-void 
+void
 cd_read_func(struct spdk_bdev_io *bdev_io, bool success, void *cb_arg)
 {
     container *cont = cb_arg;
@@ -98,7 +98,7 @@ cd_read_func(struct spdk_bdev_io *bdev_io, bool success, void *cb_arg)
     SPDK_WARNLOG("test (read) success\n");
 }
 
-void 
+void
 cd_write_func(struct spdk_bdev_io *bdev_io, bool success, void *cb_arg)
 {
     container *cont = cb_arg;
@@ -117,7 +117,7 @@ cd_write_func(struct spdk_bdev_io *bdev_io, bool success, void *cb_arg)
 
 void
 submit_write_request_base_bdev(struct raid_bdev *raid_bdev, uint8_t idx)
-{   
+{
     struct spdk_bdev_desc *desc = __base_desc_from_raid_bdev(raid_bdev, idx);
     struct spdk_bdev *base_bdev = spdk_bdev_desc_get_bdev(desc);
     struct spdk_io_channel *ch = spdk_bdev_get_io_channel(desc);
@@ -194,7 +194,7 @@ _free_sg_buffer_part(struct iovec *vec_array, uint32_t len)
 }
 
 static inline void
-free_sg_buffer (struct iovec **vec_array, uint32_t len) 
+free_sg_buffer (struct iovec **vec_array, uint32_t len)
 {
     /* usage: struct iovec *a; free_sg_buffer(&a, b); */
 
@@ -241,12 +241,12 @@ allocate_sg_buffer(uint32_t elem_size, uint32_t elemcnt, uint32_t elem_per_vec)
     return vec_array;
 }
 
-/* 
+/*
 TODO: надо сделать какую-то крутую функция калбэка (наверное, нужен частичный и полный)
 При полном, надо обнулять флаги REBUILD_FLAG_NEED_REBUILD и REBUILD_FLAG_IN_PROGRESS
-*/ 
+*/
 
-int 
+int
 run_rebuild_poller(void* arg)
 { //TODO: в целом реализация наивная (без учета многопоточности) - не очень пока понимаю, как ее прикрутить.
     struct raid_bdev *raid_bdev = arg;
@@ -255,19 +255,18 @@ run_rebuild_poller(void* arg)
 #ifdef DEBUG__
     SPDK_WARNLOG("poller is working now with: %s!\n", raid_bdev->bdev.name);
 #endif
-    
+
     if(rebuild == NULL)
     {
-       SPDK_WARNLOG("%s doesn't have rebuild struct!\n", raid_bdev->bdev.name); 
+       SPDK_WARNLOG("%s doesn't have rebuild struct!\n", raid_bdev->bdev.name);
        return 1;
     }
 
-    /* area size in strips */ 
-    uint64_t area_size = rebuild->strips_per_area;
-    /* strip size in blocks */
-    uint32_t strip_size = raid_bdev->strip_size;
-    /* block size in bytes */
-    uint32_t block_size = raid_bdev->strip_size_kb / raid_bdev->strip_size;
+    if(!SPDK_TEST_BIT(&rebuild->rebuild_flag, REBUILD_FLAG_INITIALIZED))
+    {
+        /* the rebuild structure has not yet been initialized */
+        return 0;
+    }
 
     if (!SPDK_TEST_BIT(&(rebuild->rebuild_flag), REBUILD_FLAG_IN_PROGRESS))
     {
@@ -282,9 +281,17 @@ run_rebuild_poller(void* arg)
         return 0;
     }
 
-    SPDK_SET_BIT(&(rebuild->rebuild_flag), REBUILD_FLAG_IN_PROGRESS);
+    if (raid_bdev->module->rebuild_request != NULL)
+    {
+        raid_bdev->module->rebuild_request(raid_bdev);
+    }
 
-    //TODO: тут запуск системы ребилда. 
+    // uint64_t
+
+    for (uint64_t i = 0; i < rebuild->num_memory_areas ; i++)
+    {
+
+    }
 
     return 0;
 }
