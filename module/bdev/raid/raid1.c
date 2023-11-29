@@ -264,7 +264,7 @@ init_rebuild(struct raid_bdev *raid_bdev)
 	raid_bdev->rebuild->strips_per_area = SPDK_CEIL_DIV(stripcnt, MATRIX_REBUILD_SIZE);
 	raid_bdev->rebuild->num_memory_areas = SPDK_CEIL_DIV(stripcnt, raid_bdev->rebuild->strips_per_area);
 	raid_bdev->rebuild->rebuild_flag = REBUILD_FLAG_INIT_CONFIGURATION;
-	raid_bdev->rebuild->rebuild_flag = SPDK_SET_BIT(&(raid_bdev->rebuild->rebuild_flag), REBUILD_FLAG_INITIALIZED);
+	SPDK_SET_BIT(&(raid_bdev->rebuild->rebuild_flag), REBUILD_FLAG_INITIALIZED);
 }
 
 static void

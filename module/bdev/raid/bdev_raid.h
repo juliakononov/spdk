@@ -16,13 +16,16 @@ enum rebuild_flag {
 	REBUILD_FLAG_INIT_CONFIGURATION = 0,
 
 	/* if there is at least one broken area in rbm(rebuild_matrix) */
-	REBUILD_FLAG_NEED_REBUILD = 1, //TODO: можно переписать как счетчик областей, которые надо проребилдить (мб поможет при атомарном снятии флага)
+	REBUILD_FLAG_NEED_REBUILD = 1, //TODO: можно переписать как счетчик областей, которые надо проребилдить (мб поможет при атомарном снятии флага) + у Юли инкремент такого щетчика должен быть до выставления единичек
 
-	/* if service start rebuild process */
+	/* if service start rebuild cycle */
 	REBUILD_FLAG_IN_PROGRESS = 2,
 
+	/* fatal error during rebuild cycle */
+	REBUILD_FLAG_FATAL_ERROR = 59,
+
 	/* show that rebuild struct is initialized */
-	REBUILD_FLAG_INITIALIZED = 63,
+	REBUILD_FLAG_INITIALIZED = 60,
 };
 
 enum raid_level {
@@ -74,6 +77,9 @@ struct raid_rebuild {
 
 	/* rebuild flag */
 	uint64_t			rebuild_flag; //TODO: переписать на атомики
+
+	/* broken areas counter */
+	// uint64_t			broken_areas_cnt; //TODO: выпилить
 
 	/* 
 	 * structure describing a specific rebuild 

@@ -247,6 +247,12 @@ TODO: надо сделать какую-то крутую функция кал
 При полном, надо обнулять флаги REBUILD_FLAG_NEED_REBUILD и REBUILD_FLAG_IN_PROGRESS
 */
 
+static inline void
+rebuild_cycle_init(struct rebuild_progress *re_progress)
+{
+
+}
+
 static inline uint16_t
 count_broken_areas(uint64_t area_str)
 {
@@ -261,60 +267,56 @@ count_broken_areas(uint64_t area_str)
 }
 
 static inline void
-free_rebuild_progress(struct rebuild_progress *re_progress)
+finish_rebuild_cycle(struct raid_rebuild *rebuild)
 {
-    struct rebuild_elem *re_elem;
-
-    for(uint64_t i = 0; i < re_progress->area_str_cnt; i++)
-    {
-        re_elem = re_progress->list.slh_first;
-        if(re_elem == NULL) break;
-
-        SLIST_REMOVE_HEAD(&(re_progress->list), list_entry);
-        free(re_elem);
-    }
-    free(re_progress);
+    // rebuild->broken_areas_cnt -= rebuild->re_progress->clear_area_str_cnt;
+    free(rebuild->re_progress);
+    rebuild->re_progress = NULL;
+    SPDK_REMOVE_BIT(fl(rebuild), REBUILD_FLAG_IN_PROGRESS);
 }
-
 
 int
 run_rebuild_poller(void* arg)
 { //TODO: в целом реализация наивная (без учета многопоточности) - не очень пока понимаю, как ее прикрутить.
     struct raid_bdev *raid_bdev = arg;
     struct raid_rebuild *rebuild = raid_bdev->rebuild;
+    struct rebuild_progress *re_progress = NULL;
 
 #ifdef DEBUG__
     SPDK_WARNLOG("poller is working now with: %s!\n", raid_bdev->bdev.name);
 #endif
 
-    if(rebuild == NULL)
+    if (rebuild == NULL)
     {
        SPDK_WARNLOG("%s doesn't have rebuild struct!\n", raid_bdev->bdev.name);
        return 1;
     }
-
-    if(!SPDK_TEST_BIT(&rebuild->rebuild_flag, REBUILD_FLAG_INITIALIZED))
+    if (!SPDK_TEST_BIT(fl(rebuild), REBUILD_FLAG_INITIALIZED))
     {
-        /* the rebuild structure has not yet been initialized */
+        /* 
+         * the rebuild structure has not yet been initialized
+         * or
+         * the raid doesn't need to start rebuild process 
+         */
         return 0;
     }
-
-    if (!SPDK_TEST_BIT(&(rebuild->rebuild_flag), REBUILD_FLAG_IN_PROGRESS))
+    if (SPDK_TEST_BIT(&(rebuild->rebuild_flag), REBUILD_FLAG_FATAL_ERROR))
+    {
+        SPDK_WARNLOG("%s catch fatal error during rebuild process!\n", raid_bdev->bdev.name);
+        return 1;
+    }
+    if (SPDK_TEST_BIT(fl(rebuild), REBUILD_FLAG_IN_PROGRESS))
     {
         /* The recovery process is not complete */
-        //TODO: я правильно понял, что мне надо обрабо (which were processed)тать этот кейс, так как поллер будет запускаться даже тогда, когда я еще не завершил обработку.
-        return 0;
-    }
-
-    if (!SPDK_TEST_BIT(&(rebuild->rebuild_flag), REBUILD_FLAG_NEED_REBUILD))
-    {
-        /* The raid doesn't need to start rebuild process */
+        if (rebuild->re_progress->area_str_cnt == rebuild->re_progress->clear_area_str_cnt) 
+        {
+            finish_rebuild_cycle(rebuild);
+        }
         return 0;
     }
 
     uint64_t stripescnt = 0;
-    struct rebuild_elem *re_elem;
-    struct rebuild_progress *re_progress = calloc(1, sizeof(struct rebuild_progress));
+    re_progress = calloc(1, sizeof(struct rebuild_progress));
     
     if (re_progress == NULL)
     {
@@ -322,30 +324,25 @@ run_rebuild_poller(void* arg)
         return 1;
     }
 
-    SLIST_INIT(&(re_progress->list));
     re_progress->clear_area_str_cnt = 0;
-
+    re_progress->partly_completed = false;
+ 
     for (uint64_t i = 0; i < rebuild->num_memory_areas ; i++)
     {
         if (IS_AREA_STR_CLEAR(rebuild->rebuild_matrix[i])) continue;
 
-        re_elem = calloc(1, sizeof(struct rebuild_elem));
+        SPDK_SET_BIT(&(re_progress->area_proection[_GET_IDX(i)]), _GET_SHFT(i));
 
-        if (re_elem == NULL)
-        {
-            free_rebuild_progress(re_progress);
-            re_progress = NULL;
-            return 1;
-        }
-        re_elem->area_stripe = CREATE_AREA_STR_SNAPSHOT(rebuild->rebuild_matrix[i]);
-        re_elem->areacnt = count_broken_areas(re_elem->area_stripe);
         re_progress->area_str_cnt += 1;
-        SLIST_INSERT_HEAD(&(re_progress->list), re_elem, list_entry);
     }
 
     if (raid_bdev->module->rebuild_request != NULL)
     {
+        SPDK_SET_BIT(fl(rebuild), REBUILD_FLAG_IN_PROGRESS);
         raid_bdev->module->rebuild_request(raid_bdev, re_progress);
+    } else {
+        SPDK_ERRLOG("rebuild_request inside raid%d doesn't implemented\n", raid_bdev->level);
+        return 1;
     }
     return 0;
 }
