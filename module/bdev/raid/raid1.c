@@ -3,6 +3,7 @@
  *   All rights reserved.
  */
 #include "bdev_raid.h"
+#include "service.h"
 
 #include "spdk/likely.h"
 #include "spdk/log.h"
@@ -316,7 +317,7 @@ raid1_stop(struct raid_bdev *raid_bdev)
 }
 
 static int
-raid1_submit_rebuild_request(struct raid_bdev *raid_bdev)
+raid1_submit_rebuild_request(struct raid_bdev *raid_bdev, struct rebuild_progress *re_progress)
 {
 	struct raid_rebuild *rebuild = raid_bdev->rebuild;
 

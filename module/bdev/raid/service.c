@@ -8,6 +8,7 @@
 #include "spdk/likely.h"
 #include "spdk/log.h"
 #include "spdk/util.h"
+#include "spdk/queue.h"
 
 #include "bdev_raid.h"
 #include "service.h"
@@ -246,6 +247,36 @@ TODO: надо сделать какую-то крутую функция кал
 При полном, надо обнулять флаги REBUILD_FLAG_NEED_REBUILD и REBUILD_FLAG_IN_PROGRESS
 */
 
+static inline uint16_t
+count_broken_areas(uint64_t area_str)
+{
+    uint16_t cnt = 0;
+
+    for (uint16_t i = 0; i < LEN_AREA_STR_IN_BIT; i++)
+    {
+        if(SPDK_TEST_BIT(&area_str, i)) cnt += 1;
+    }
+
+    return cnt;
+}
+
+static inline void
+free_rebuild_progress(struct rebuild_progress *re_progress)
+{
+    struct rebuild_elem *re_elem;
+
+    for(uint64_t i = 0; i < re_progress->area_str_cnt; i++)
+    {
+        re_elem = re_progress->list.slh_first;
+        if(re_elem == NULL) break;
+
+        SLIST_REMOVE_HEAD(&(re_progress->list), list_entry);
+        free(re_elem);
+    }
+    free(re_progress);
+}
+
+
 int
 run_rebuild_poller(void* arg)
 { //TODO: в целом реализация наивная (без учета многопоточности) - не очень пока понимаю, как ее прикрутить.
@@ -271,7 +302,7 @@ run_rebuild_poller(void* arg)
     if (!SPDK_TEST_BIT(&(rebuild->rebuild_flag), REBUILD_FLAG_IN_PROGRESS))
     {
         /* The recovery process is not complete */
-        //TODO: я правильно понял, что мне надо обработать этот кейс, так как поллер будет запускаться даже тогда, когда я еще не завершил обработку.
+        //TODO: я правильно понял, что мне надо обрабо (which were processed)тать этот кейс, так как поллер будет запускаться даже тогда, когда я еще не завершил обработку.
         return 0;
     }
 
@@ -281,17 +312,40 @@ run_rebuild_poller(void* arg)
         return 0;
     }
 
-    if (raid_bdev->module->rebuild_request != NULL)
+    uint64_t stripescnt = 0;
+    struct rebuild_elem *re_elem;
+    struct rebuild_progress *re_progress = calloc(1, sizeof(struct rebuild_progress));
+    
+    if (re_progress == NULL)
     {
-        raid_bdev->module->rebuild_request(raid_bdev);
+        SPDK_ERRLOG("the struct rebuild_progress wasn't allocated \n");
+        return 1;
     }
 
-    // uint64_t
+    SLIST_INIT(&(re_progress->list));
+    re_progress->clear_area_str_cnt = 0;
 
     for (uint64_t i = 0; i < rebuild->num_memory_areas ; i++)
     {
+        if (IS_AREA_STR_CLEAR(rebuild->rebuild_matrix[i])) continue;
 
+        re_elem = calloc(1, sizeof(struct rebuild_elem));
+
+        if (re_elem == NULL)
+        {
+            free_rebuild_progress(re_progress);
+            re_progress = NULL;
+            return 1;
+        }
+        re_elem->area_stripe = CREATE_AREA_STR_SNAPSHOT(rebuild->rebuild_matrix[i]);
+        re_elem->areacnt = count_broken_areas(re_elem->area_stripe);
+        re_progress->area_str_cnt += 1;
+        SLIST_INSERT_HEAD(&(re_progress->list), re_elem, list_entry);
     }
 
+    if (raid_bdev->module->rebuild_request != NULL)
+    {
+        raid_bdev->module->rebuild_request(raid_bdev, re_progress);
+    }
     return 0;
 }

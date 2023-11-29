@@ -16,7 +16,7 @@ enum rebuild_flag {
 	REBUILD_FLAG_INIT_CONFIGURATION = 0,
 
 	/* if there is at least one broken area in rbm(rebuild_matrix) */
-	REBUILD_FLAG_NEED_REBUILD = 1,
+	REBUILD_FLAG_NEED_REBUILD = 1, //TODO: можно переписать как счетчик областей, которые надо проребилдить (мб поможет при атомарном снятии флага)
 
 	/* if service start rebuild process */
 	REBUILD_FLAG_IN_PROGRESS = 2,
@@ -73,7 +73,13 @@ struct raid_rebuild {
 	uint64_t			strips_per_area;
 
 	/* rebuild flag */
-	uint64_t			rebuild_flag;
+	uint64_t			rebuild_flag; //TODO: переписать на атомики
+
+	/* 
+	 * structure describing a specific rebuild 
+	 * (i.e. when re_progress == NULL, REBUILD_FLAG_IN_PROGRESS is omitted) 
+	 */ 
+	struct rebuild_progress *re_progress;
 };
 
 /*
@@ -297,7 +303,7 @@ struct raid_bdev_module {
 	 * Called to submit rebuild request
 	 * If implemented.
 	 */
-	int (*rebuild_request)(struct raid_bdev *raid_bdev);
+	int (*rebuild_request)(struct raid_bdev *raid_bdev, struct rebuild_progress *re_progress);
 
 	TAILQ_ENTRY(raid_bdev_module) link;
 };
