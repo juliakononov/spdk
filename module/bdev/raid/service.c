@@ -247,14 +247,8 @@ TODO: надо сделать какую-то крутую функция кал
 При полном, надо обнулять флаги REBUILD_FLAG_NEED_REBUILD и REBUILD_FLAG_IN_PROGRESS
 */
 
-static inline void
-rebuild_cycle_init(struct rebuild_progress *re_progress)
-{
-
-}
-
 static inline uint16_t
-count_broken_areas(uint64_t area_str)
+count_broken_areas(ATOMIC_SNAPSHOT_TYPE area_str)
 {
     uint16_t cnt = 0;
 
@@ -266,13 +260,68 @@ count_broken_areas(uint64_t area_str)
     return cnt;
 }
 
+static inline uint64_t
+init_rebuild_cycle(struct rebuild_progress *cycle_progress, struct raid_bdev *raid_bdev)
+{
+    int64_t start_idx = NOT_NEED_REBUILD;
+    struct raid_rebuild *rebuild = raid_bdev->rebuild;
+
+    cycle_progress->clear_area_str_cnt = 0;
+
+    for (uint64_t i = 0; i < rebuild->num_memory_areas ; i++)
+    {
+        if (IS_AREA_STR_CLEAR(rebuild->rebuild_matrix[i])) continue;
+
+        if(start_idx == NOT_NEED_REBUILD) 
+        {
+            start_idx = i;
+        }
+
+        SPDK_SET_BIT(&(cycle_progress->area_proection[b_GET_IDX_BP(i)]), b_GET_SHFT_BP(i));
+
+        cycle_progress->area_str_cnt += 1;
+    }
+
+    if (start_idx != NOT_NEED_REBUILD) 
+    {
+        raid_bdev->rebuild->cycle_progress = cycle_progress;
+    } else {
+        raid_bdev->rebuild->cycle_progress = NULL;
+    }
+
+    return start_idx;
+}
+
 static inline void
 finish_rebuild_cycle(struct raid_rebuild *rebuild)
 {
-    // rebuild->broken_areas_cnt -= rebuild->re_progress->clear_area_str_cnt;
-    free(rebuild->re_progress);
-    rebuild->re_progress = NULL;
+    free(rebuild->cycle_progress);
+    rebuild->cycle_progress = NULL;
     SPDK_REMOVE_BIT(fl(rebuild), REBUILD_FLAG_IN_PROGRESS);
+}
+
+void
+init_cycle_iteration(struct raid_rebuild *rebuild, int64_t next_idx)
+{
+    struct rebuild_cycle_iteration *cycle_iter = &(rebuild->cycle_progress->cycle_iteration);
+
+    cycle_iter->idx = next_idx;
+    cycle_iter->complete = false;
+    cycle_iter->snapshot = CREATE_AREA_STR_SNAPSHOT(rebuild->rebuild_matrix[next_idx]);
+    cycle_iter->br_area_cnt = count_broken_areas(cycle_iter->snapshot);
+    // cycle_iter->cl_area_cnt = 0;
+    cycle_iter->result = cycle_iter->snapshot;
+    cycle_iter->areas_md = 0;
+}
+
+/*
+ * Callback function. It run next iteration of rebuild cycle (process next "1" from area_proection)
+ */
+void
+continue_rebuild_cycle(struct spdk_bdev_io *bdev_io, bool success, void *cb_arg)
+{
+    //TODO: 
+    // spdk_bdev_free_io(bdev_io);
 }
 
 int
@@ -280,7 +329,7 @@ run_rebuild_poller(void* arg)
 { //TODO: в целом реализация наивная (без учета многопоточности) - не очень пока понимаю, как ее прикрутить.
     struct raid_bdev *raid_bdev = arg;
     struct raid_rebuild *rebuild = raid_bdev->rebuild;
-    struct rebuild_progress *re_progress = NULL;
+    struct rebuild_progress *cycle_progress = NULL;
 
 #ifdef DEBUG__
     SPDK_WARNLOG("poller is working now with: %s!\n", raid_bdev->bdev.name);
@@ -295,8 +344,6 @@ run_rebuild_poller(void* arg)
     {
         /* 
          * the rebuild structure has not yet been initialized
-         * or
-         * the raid doesn't need to start rebuild process 
          */
         return 0;
     }
@@ -308,38 +355,43 @@ run_rebuild_poller(void* arg)
     if (SPDK_TEST_BIT(fl(rebuild), REBUILD_FLAG_IN_PROGRESS))
     {
         /* The recovery process is not complete */
-        if (rebuild->re_progress->area_str_cnt == rebuild->re_progress->clear_area_str_cnt) 
+        if (rebuild->cycle_progress->area_str_cnt == rebuild->cycle_progress->clear_area_str_cnt) 
         {
             finish_rebuild_cycle(rebuild);
         }
         return 0;
     }
 
-    uint64_t stripescnt = 0;
-    re_progress = calloc(1, sizeof(struct rebuild_progress));
+    cycle_progress = calloc(1, sizeof(struct rebuild_progress));
     
-    if (re_progress == NULL)
+    if (cycle_progress == NULL)
     {
         SPDK_ERRLOG("the struct rebuild_progress wasn't allocated \n");
         return 1;
     }
 
-    re_progress->clear_area_str_cnt = 0;
-    re_progress->partly_completed = false;
- 
-    for (uint64_t i = 0; i < rebuild->num_memory_areas ; i++)
+    /* 
+     * Representation of area-stripe index in the area_proection 
+     * (from which the rebuild cycle will begin) 
+     */ 
+    int64_t start_idx = NOT_NEED_REBUILD;
+
+    init_rebuild_cycle(cycle_progress, raid_bdev);
+
+    if(start_idx == NOT_NEED_REBUILD)
     {
-        if (IS_AREA_STR_CLEAR(rebuild->rebuild_matrix[i])) continue;
-
-        SPDK_SET_BIT(&(re_progress->area_proection[_GET_IDX(i)]), _GET_SHFT(i));
-
-        re_progress->area_str_cnt += 1;
+        /* 
+         * no need for rebuild
+         */
+        free(cycle_progress);
+        return 0;
     }
 
     if (raid_bdev->module->rebuild_request != NULL)
     {
         SPDK_SET_BIT(fl(rebuild), REBUILD_FLAG_IN_PROGRESS);
-        raid_bdev->module->rebuild_request(raid_bdev, re_progress);
+        init_cycle_iteration(rebuild, start_idx);
+        raid_bdev->module->rebuild_request(raid_bdev, cycle_progress, continue_rebuild_cycle);
     } else {
         SPDK_ERRLOG("rebuild_request inside raid%d doesn't implemented\n", raid_bdev->level);
         return 1;

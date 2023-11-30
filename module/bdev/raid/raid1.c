@@ -317,7 +317,7 @@ raid1_stop(struct raid_bdev *raid_bdev)
 }
 
 static int
-raid1_submit_rebuild_request(struct raid_bdev *raid_bdev, struct rebuild_progress *re_progress)
+raid1_submit_rebuild_request(struct raid_bdev *raid_bdev, struct rebuild_progress *cycle_progress, spdk_bdev_io_completion_cb cb)
 {
 	struct raid_rebuild *rebuild = raid_bdev->rebuild;
 
