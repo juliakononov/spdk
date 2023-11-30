@@ -311,7 +311,6 @@ init_cycle_iteration(struct raid_rebuild *rebuild, int64_t next_idx)
     cycle_iter->br_area_cnt = count_broken_areas(cycle_iter->snapshot);
     // cycle_iter->cl_area_cnt = 0;
     cycle_iter->result = cycle_iter->snapshot;
-    cycle_iter->areas_md = 0;
 }
 
 /*
